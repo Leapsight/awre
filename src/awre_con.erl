@@ -312,9 +312,9 @@ handle_message_from_router({invocation,RequestId,RegistrationId,Details,Argument
   {ok,NewState};
 
 handle_message_from_router({error,_Any,RequestId,Details,Error},State) ->
-  handle_message_from_router({error,_Any,RequestId,Details,Error,undefined,undefined},State);
+  handle_message_from_router({error,_Any,RequestId,Details,Error,[],#{}},State);
 handle_message_from_router({error,_Any,RequestId,Details,Error,Arguments},State) ->
-  handle_message_from_router({error,_Any,RequestId,Details,Error,Arguments,undefined},State);
+  handle_message_from_router({error,_Any,RequestId,Details,Error,Arguments,#{}},State);
 handle_message_from_router({error,_Any,RequestId,Details,Error,Arguments,ArgumentsKw},State) ->
   {From,_} = get_ref(RequestId,call,State),
   gen_server:reply(From,{error,Details,Error,Arguments,ArgumentsKw}),
