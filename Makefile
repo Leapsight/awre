@@ -6,7 +6,7 @@ ERLC_OPTS = +debug_info
 COMPILE_FIRST = awre_transport.erl
 
 DEPS = wamper
-dep_wamper = git https://github.com/bwegh/wamper master
+dep_wamper = git https://github.com/frepond/wamper master
 
 TEST_DEPS = erwa
 dep_erwa = git https://github.com/bwegh/erwa master
