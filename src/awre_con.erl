@@ -233,9 +233,9 @@ handle_message_from_router({unsubscribed,RequestId},#state{ets=Ets}=State) ->
   {ok,State};
 
 handle_message_from_router({event,SubscriptionId,PublicationId,Details},State) ->
-  handle_message_from_router({event,SubscriptionId,PublicationId,Details,undefined,undefined},State);
+  handle_message_from_router({event,SubscriptionId,PublicationId,Details,[],#{}},State);
 handle_message_from_router({event,SubscriptionId,PublicationId,Details,Arguments},State) ->
-  handle_message_from_router({event,SubscriptionId,PublicationId,Details,Arguments,undefined},State);
+  handle_message_from_router({event,SubscriptionId,PublicationId,Details,Arguments,#{}},State);
 handle_message_from_router({event,SubscriptionId,_PublicationId,Details,Arguments,ArgumentsKw}=Msg,#state{ets=Ets}=State) ->
   [#subscription{
                 id = SubscriptionId,
@@ -255,9 +255,9 @@ handle_message_from_router({event,SubscriptionId,_PublicationId,Details,Argument
   end,
   {ok,State};
 handle_message_from_router({result,RequestId,Details},State) ->
-  handle_message_from_router({result,RequestId,Details,undefined,undefined},State);
+  handle_message_from_router({result,RequestId,Details,[],#{}},State);
 handle_message_from_router({result,RequestId,Details,Arguments},State) ->
-  handle_message_from_router({result,RequestId,Details,Arguments,undefined},State);
+  handle_message_from_router({result,RequestId,Details,Arguments,#{}},State);
 handle_message_from_router({result,RequestId,Details,Arguments,ArgumentsKw},State) ->
   {From,_} = get_ref(RequestId,call,State),
   gen_server:reply(From,{ok,Details,Arguments,ArgumentsKw}),
@@ -279,9 +279,9 @@ handle_message_from_router({unregistered,RequestId},#state{ets=Ets}=State) ->
   {ok,State};
 
 handle_message_from_router({invocation,RequestId,RegistrationId,Details},State) ->
-  handle_message_from_router({invocation,RequestId,RegistrationId,Details,undefined,undefined},State);
+  handle_message_from_router({invocation,RequestId,RegistrationId,Details,[],#{}},State);
 handle_message_from_router({invocation,RequestId,RegistrationId,Details,Arguments},State) ->
-  handle_message_from_router({invocation,RequestId,RegistrationId,Details,Arguments,undefined},State);
+  handle_message_from_router({invocation,RequestId,RegistrationId,Details,Arguments,#{}},State);
 handle_message_from_router({invocation,RequestId,RegistrationId,Details,Arguments,ArgumentsKw}=Msg,#state{ets=Ets}=State) ->
   [#registration{
                 id = RegistrationId,
