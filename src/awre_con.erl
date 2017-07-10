@@ -301,11 +301,11 @@ handle_message_from_router({invocation,RequestId,RegistrationId,Details,Argument
                      {ok,NState} = send_to_router({error,invocation,RequestId,Details,Uri,Arguments,ArgumentsKw},State),
                      NState;
                    Other ->
-                     {ok,NState} = send_to_router({error,invocation,RequestId,#{<<"result">> => Other },invalid_argument,undefined,undefined},State),
+                     {ok,NState} = send_to_router({error,invocation,RequestId,#{<<"result">> => Other },invalid_argument,[],#{}},State),
                      NState
                  catch
                    Error:Reason ->
-                     {ok,NState} = send_to_router({error,invocation,RequestId,#{<<"reason">> => io_lib:format("~p:~p",[Error,Reason])},invalid_argument,undefined,undefined},State),
+                     {ok,NState} = send_to_router({error,invocation,RequestId,#{<<"reason">> => io_lib:format("~p:~p",[Error,Reason])},invalid_argument,[],#{}},State),
                      NState
                  end
              end,
