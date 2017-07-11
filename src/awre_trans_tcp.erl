@@ -93,8 +93,12 @@ handle_info({tcp,Socket,<<127,L:4,S:4,0,0>>},
   S = SerNum,
   State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
   send_to_router({hello,Realm,#{agent=>Version, roles => CDetails}},State1);
+handle_info({tcp_closed, _Socket}, State) ->
+  {stop, normal, State};
+  handle_info({tcp_error, _Socket, _}, State) ->
+  {stop, normal, State};
 handle_info(_Data,State) ->
-  {ok,State}.
+  {noreply, State}.
 
 
 shutdown(#state{socket=S}) ->
