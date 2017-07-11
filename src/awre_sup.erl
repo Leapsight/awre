@@ -41,6 +41,6 @@ start_link() ->
 
 init([]) ->
 Procs = [
-		{awre_con, {awre_con, start_link, []}, temporary, 5000, supervisor, []}
+		{awre_con, {awre_con, start_link, []}, temporary, 5000, worker, []}
 	],
 	{ok, {{simple_one_for_one, 10, 10}, Procs}}.
