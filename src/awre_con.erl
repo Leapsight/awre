@@ -23,7 +23,7 @@
 %% @private
 -module(awre_con).
 -behaviour(gen_server).
-
+-compile([{parse_transform, lager_transform}]).
 
 -export([send_to_client/2]).
 -export([close_connection/1]).
@@ -139,7 +139,7 @@ handle_info(Data,#state{transport = {T,TState}} = State) ->
     {ok,NewTState} ->
       {noreply,State#state{transport={T,NewTState}}};
     {stop,Reason,NewTState} ->
-      io:format( "rako: stop ~p~n", [Reason]),
+      lager:info( "Connection closed: Reason=~p", [Reason] ),
       {stop,Reason,State#state{transport={T,NewTState}}}
   end;
 handle_info(_Info, State) ->
@@ -204,9 +204,10 @@ handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {ok,State};
 
 handle_message_from_router({abort,Details,Reason},State) ->
-  io:format( "Abort: Details=~p, Reason=~p~n", [Details, Reason] ),
+  lager:warning( "Abort: Details=~p, Reason=~p", [Details, Reason] ),
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{abort,Details,Reason}),
+  close_connection(),
   {ok,State};
 
 handle_message_from_router({goodbye,_Details,_Reason},#state{goodbye_sent=GS}=State) ->
