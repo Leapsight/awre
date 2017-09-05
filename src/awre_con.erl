@@ -134,8 +134,14 @@ handle_cast(_Request, State) ->
 
 
 handle_info(Data,#state{transport = {T,TState}} = State) ->
-  {ok,NewTState} = T:handle_info(Data,TState),
-  {noreply,State#state{transport={T,NewTState}}};
+  Res = T:handle_info(Data,TState),
+  case Res of
+    {ok,NewTState} ->
+      {noreply,State#state{transport={T,NewTState}}};
+    {stop,Reason,NewTState} ->
+      io:format( "rako: stop ~p~n", [Reason]),
+      {stop,Reason,State#state{transport={T,NewTState}}}
+  end;
 handle_info(_Info, State) ->
 	{noreply, State}.
 
@@ -198,9 +204,10 @@ handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {ok,State};
 
 handle_message_from_router({abort,Details,Reason},State) ->
+  io:format( "Abort: Details=~p, Reason=~p~n", [Details, Reason] ),
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{abort,Details,Reason}),
-  {stop,normal,State};
+  {ok,State};
 
 handle_message_from_router({goodbye,_Details,_Reason},#state{goodbye_sent=GS}=State) ->
   NewState = case GS of
