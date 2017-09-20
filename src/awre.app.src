@@ -31,7 +31,8 @@
 	{applications, [
 		kernel,
 		stdlib,
-		wamper
+		wamper,
+        lager
 	]},
 	{mod, {awre_app, []}},
 	{env, []}
