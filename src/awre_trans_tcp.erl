@@ -71,6 +71,11 @@ init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := V
   ok = gen_tcp:send(Socket,<<127,MaxLen:4,SerNum:4,0,0>>),
   {ok,#state{awre_con=Con, version = Version, client_details=CDetails, socket=Socket, enc=Enc, sernum=SerNum, realm=Realm}}.
 
+send_to_router({pong, Payload}, #state{socket= S} = State) ->
+  Frame = <<0:5, 2:3, (byte_size(Payload)):24, Payload/binary>>,
+  ok = gen_tcp:send(S, Frame),
+  {ok, State};
+
 send_to_router(Message,#state{socket=S, enc=Enc, out_max=MaxLength} = State) ->
   SerMessage = wamper_protocol:serialize(Message,Enc),
   case byte_size(SerMessage) > MaxLength of
@@ -107,8 +112,12 @@ shutdown(#state{socket=S}) ->
 
 
 
-forward_messages([],_) ->
+forward_messages([], _) ->
   ok;
+forward_messages([{ping, Payload}|Tail], State0) ->
+  {ok, State1} = send_to_router({pong, Payload}, State0),
+  forward_messages(Tail, State1);
+
 forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
   awre_con:send_to_client(Msg,Con),
   forward_messages(Tail,State).
