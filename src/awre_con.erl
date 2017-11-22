@@ -197,7 +197,6 @@ handle_message_from_client(_Msg,_From,State) ->
 
 
 
-
 handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{ok,SessionId,RouterDetails}),
