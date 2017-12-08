@@ -24,8 +24,7 @@
 -module(awre_trans_tcp).
 -behaviour(awre_transport).
 
--define(TIMEOUT, ?PING_TIMEOUT * 2).
--define(PING_TIMEOUT, 30000). % 30 secs
+
 -define(RAW_PING_PREFIX, 1). % <<0:5, 1:3>>
 -define(RAW_PONG_PREFIX, 2). % <<0:5, 2:3>>
 
@@ -44,12 +43,10 @@
     client_details = unknown,
     buffer = <<"">>,
     out_max = unknown,
-    handshake = in_progress,
-    ping_sent = false       ::  {true, binary(), reference()} | false,
-    ping_attempts = 0       ::  non_neg_integer(),
-    ping_max_attempts = 2   ::  non_neg_integer()
+    handshake = in_progress
 }).
 
+-compile([{parse_transform, lager_transform}]).
 
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
     host := Host, port := Port, enc := Encoding}) ->
@@ -86,8 +83,13 @@ init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := V
         sernum = SerNum,
         realm = Realm
     },
-    {ok, State, ?TIMEOUT}.
+    {ok, State}.
 
+
+send_to_router({ping, Payload}, #state{socket= S} = State) ->
+    Frame = <<(?RAW_PING_PREFIX):8, (byte_size(Payload)):24, Payload/binary>>,
+    ok = gen_tcp:send(S, Frame),
+    {ok, State};
 
 send_to_router({pong, Payload}, #state{socket= S} = State) ->
     Frame = <<(?RAW_PONG_PREFIX):8, (byte_size(Payload)):24, Payload/binary>>,
@@ -125,32 +127,6 @@ handle_info({tcp_error, Socket, Reason}, State) ->
         "Connection closed, socket='~p', reason=~p", [Socket, Reason]),
     {stop, Reason, State};
 
-handle_info(timeout, #state{ping_sent = false} = State0) ->
-    N = State0#state.ping_max_attempts - State0#state.ping_attempts,
-    _ = lager:debug(
-        "Timeout. Sending ping to router, remaining_attempts=~p", [N]),
-    {ok, State1} = send_ping(State0),
-	{noreply, State1};
-
-handle_info(
-    ping_timeout,
-    #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
-    _ = lager:error(
-        "Connection closing, reason=ping_timeout, attempts=~p", [N]),
-	{stop, timeout, State#state{ping_sent = false}};
-
-handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
-    %% We try again until we reach ping_max_attempts
-    N = State#state.ping_max_attempts - State#state.ping_attempts,
-    _ = lager:debug(
-        "Ping timeout. Sending additional ping to router, "
-        "remaining_attempts=~p",
-        [N]
-    ),
-    {ok, State1} = send_ping(Bin, State),
-    {noreply, State1};
-
-
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
 	{noreply, State}.
@@ -165,32 +141,13 @@ shutdown(#state{socket=S}) ->
 forward_messages([], _) ->
   ok;
 
-forward_messages([{pong, Payload}|Tail], St) ->
-    %% We received a PONG
-    _ = lager:debug("Received pong from router", []),
-    case St#state.ping_sent of
-        {true, Payload, TimerRef} ->
-            %% We reset the state
-            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            forward_messages(Tail, St#state{ping_sent = false});
-        {true, _, TimerRef} ->
-            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            _ = lager:error(
-                "Invalid pong message from peer, reason=invalid_payload", []),
-            {stop, invalid_ping_response, St};
-        false ->
-            _ = lager:error("Unrequested pong message from peer", []),
-            %% Should we stop instead?
-            forward_messages(Tail, St)
-    end;
-
 forward_messages([{ping, Payload}|Tail], State0) ->
   {ok, State1} = send_to_router({pong, Payload}, State0),
   forward_messages(Tail, State1);
 
 forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
   awre_con:send_to_client(Msg,Con),
-  forward_messages(Tail,State).
+  forward_messages(Tail, State).
 
 
 
@@ -202,26 +159,4 @@ forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
 
 
 
-%% @private
-send_ping(St) ->
-    send_ping(term_to_binary(make_ref()), St).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Sends a ping message with a reference() as a payload to the client and sent
-%% ourselves a ping_timeout message in the future.
-%% @end
-%% -----------------------------------------------------------------------------
-send_ping(Bin, St0) ->
-    Frame = <<(?RAW_PING_PREFIX):8, (byte_size(Bin)):24, Bin/binary>>,
-    ok = gen_tcp:send(St0#state.socket, Frame),
-    Timeout = ?PING_TIMEOUT,
-    TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
-    St1 = St0#state{
-        ping_sent = {true, Bin, TimerRef},
-        ping_attempts = St0#state.ping_attempts + 1
-    },
-    {ok, St1}.
 

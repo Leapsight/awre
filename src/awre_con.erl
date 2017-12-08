@@ -25,6 +25,11 @@
 -behaviour(gen_server).
 -compile([{parse_transform, lager_transform}]).
 
+
+-define(TIMEOUT, 60000). % 60 secs
+-define(PING_TIMEOUT, 30000). % 20 secs
+
+
 -export([send_to_client/2]).
 -export([close_connection/1]).
 
@@ -57,7 +62,10 @@
                publish_id=1,
                register_id=1,
                unregister_id=1,
-               call_id=1
+               call_id=1,
+               ping_sent = false       ::  {true, binary(), reference()} | false,
+               ping_attempts = 0       ::  non_neg_integer(),
+               ping_max_attempts = 2   ::  non_neg_integer()
 
   }).
 
@@ -89,8 +97,11 @@ start_link(Args) ->
 
 -spec init(Args :: map() ) -> {ok,#state{}}.
 init(_Args) ->
+  %% dbg:tracer(), dbg:p(all,c),
+  %% dbg:tpl(?MODULE, '_', []),
+  %% dbg:tpl(awre_trans_tcp, '_', []),
   Ets = ets:new(con_data,[set,protected,{keypos,2}]),
-  {ok,#state{ets=Ets}}.
+  {ok, #state{ets=Ets}, ?TIMEOUT}.
 
 
 -spec send_to_client(Msg :: term(), Pid :: pid()) -> ok.
@@ -106,12 +117,12 @@ close_connection(Pid) ->
 handle_call({awre_call,Msg},From,State) ->
   handle_message_from_client(Msg,From,State);
 handle_call(_Msg,_From,State) ->
-  {noreply,State}.
+  {noreply,State, ?TIMEOUT}.
 
 
 handle_cast({awre_out,Msg}, State) ->
-  {ok,NewState} = handle_message_from_router(Msg,State),
-  {noreply,NewState};
+  handle_message_from_router(Msg,State);
+
 handle_cast({shutdown,Details,Reason}, #state{goodbye_sent=GS,transport= {TMod,TState}}=State) ->
   NewState = case GS of
                true ->
@@ -120,30 +131,57 @@ handle_cast({shutdown,Details,Reason}, #state{goodbye_sent=GS,transport= {TMod,T
                  {ok,NewTState} = TMod:send_to_router({goodbye,Details,Reason},TState),
                  State#state{transport={TMod,NewTState}}
              end,
-  {noreply,NewState#state{goodbye_sent=true}};
+  {noreply,NewState#state{goodbye_sent=true}, ?TIMEOUT};
 
 handle_cast(terminate,#state{transport={TMod,TState}} = State) ->
   ok = TMod:shutdown(TState),
   {stop,normal,State};
 
 handle_cast(_Request, State) ->
-	{noreply, State}.
+	{noreply, State, ?TIMEOUT}.
 
 
+handle_info(
+  timeout,
+  #state{ping_attempts = N, ping_max_attempts = N} = State) ->
+    stop_timeout(timeout, State);
+
+handle_info(timeout, #state{ping_sent = false} = State0) ->
+  {ok, State1} = send_ping(State0),
+  N = State1#state.ping_max_attempts - State0#state.ping_attempts,
+  _ = lager:debug(
+      "Timeout. Sent ping to router, remaining_attempts=~p", [N]),
+  {noreply, State1};
 
 
+handle_info(
+  ping_timeout,
+  #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
+    stop_timeout(ping_timeout, State);
+
+handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
+  %% We try again until we reach ping_max_attempts
+  N = State#state.ping_max_attempts - State#state.ping_attempts,
+  _ = lager:debug(
+      "Ping timeout. Sending additional ping to router, "
+      "remaining_attempts=~p",
+      [N]
+  ),
+  {ok, State1} = send_ping(Bin, State),
+  {noreply, State1, ?TIMEOUT};
 
 handle_info(Data,#state{transport = {T,TState}} = State) ->
   Res = T:handle_info(Data,TState),
   case Res of
     {ok,NewTState} ->
-      {noreply,State#state{transport={T,NewTState}}};
+      {noreply,State#state{transport={T,NewTState}}, ?TIMEOUT};
     {stop,Reason,NewTState} ->
       lager:info( "Connection closed: Reason=~p", [Reason] ),
       {stop,Reason,State#state{transport={T,NewTState}}}
   end;
-handle_info(_Info, State) ->
-	{noreply, State}.
+handle_info(Info, State) ->
+  _ = lager:error("Received unknown info, message='~p'", [Info]),
+	{noreply, State, ?TIMEOUT}.
 
 terminate(_Reason, _State) ->
 	ok.
@@ -159,55 +197,73 @@ handle_message_from_client({connect,Host,Port,Realm,Encoding}=Msg,From,
 
   Args = #{awre_con => self(), host => Host, port => Port, realm => Realm, enc => Encoding,
            version => awre:get_version(), client_details => ?CLIENT_DETAILS},
-  {Trans,TState} = case T of
-                         none ->
-                           awre_transport:init(Args);
-                         T ->
-                           NewTState = T:init(Args),
-                           {T,NewTState}
-                       end,
+{Trans, TState} = case T of
+    none ->
+      awre_transport:init(Args);
+    T ->
+      NewTState = T:init(Args),
+      {T,NewTState}
+  end,
   {_,NewState} = create_ref_for_message(Msg,From,#{},State),
-  {noreply,NewState#state{transport={Trans,TState}}};
+  {noreply,NewState#state{transport={Trans,TState}}, ?TIMEOUT};
 handle_message_from_client({subscribe,Options,Topic,Mfa},From,State) ->
   {ok,NewState} = send_and_ref({subscribe,request_id,Options,Topic},From,#{mfa => Mfa},State),
-  {noreply,NewState};
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({unsubscribe,SubscriptionId},From,State) ->
   {ok,NewState} = send_and_ref({unsubscribe,request_id,SubscriptionId},From,#{sub_id=>SubscriptionId},State),
-  {noreply,NewState};
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({publish,Options,Topic,Arguments,ArgumentsKw},From,State) ->
   {ok,NewState} = send_and_ref({publish,request_id,Options,Topic,Arguments,ArgumentsKw},From,#{},State),
   {reply,ok,NewState};
 handle_message_from_client({register,Options,Procedure,Mfa},From,State) ->
   {ok,NewState} = send_and_ref({register,request_id,Options,Procedure},From,#{mfa=>Mfa},State),
-  {noreply,NewState};
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({unregister,RegistrationId},From,State) ->
   {ok,NewState} = send_and_ref({unregister,request_id,RegistrationId},From,#{reg_id => RegistrationId},State),
-  {noreply,NewState};
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({call,Options,Procedure,Arguments,ArgumentsKw},From,State) ->
   {ok,NewState} = send_and_ref({call,request_id,Options,Procedure,Arguments,ArgumentsKw},From,#{},State),
-  {noreply,NewState};
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({yield,_,_,_,_}=Msg,_From,State) ->
   {ok,NewState} = send_to_router(Msg,State),
-  {reply,ok,NewState};
+  {reply,ok,NewState, ?TIMEOUT};
 handle_message_from_client({error,invocation,RequestId,ArgsKw,ErrorUri},_From,State) ->
   {ok,NewState} = send_to_router({error,invocation,RequestId,#{},ErrorUri,[],ArgsKw},State),
-  {reply,ok,NewState};
+  {reply,ok,NewState, ?TIMEOUT};
 handle_message_from_client(_Msg,_From,State) ->
-  {noreply,State}.
+  {noreply,State, ?TIMEOUT}.
 
 
+handle_message_from_router({pong, Payload}, St) ->
+  %% We received a PONG
+  _ = lager:debug("Received pong from router", []),
+  case St#state.ping_sent of
+      {true, Payload, TimerRef} ->
+          %% We reset the state
+          ok = erlang:cancel_timer(TimerRef, [{info, false}]),
+          {noreply, St#state{ping_sent = false, ping_attempts = 0}, ?TIMEOUT};
+      {true, _, TimerRef} ->
+          ok = erlang:cancel_timer(TimerRef, [{info, false}]),
+          _ = lager:error(
+              "Invalid pong message from peer, reason=invalid_payload", []),
+          {stop, invalid_ping_response, St};
+      false ->
+          _ = lager:error("Unrequested pong message from peer", []),
+          %% Should we stop instead?
+          {noreply, St, ?TIMEOUT}
+  end;
 
 handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{ok,SessionId,RouterDetails}),
-  {ok,State};
+  {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({abort,Details,Reason},State) ->
   lager:warning( "Abort: Details=~p, Reason=~p", [Details, Reason] ),
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{abort,Details,Reason}),
   close_connection(),
-  {ok,State};
+  {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({goodbye,_Details,_Reason},#state{goodbye_sent=GS}=State) ->
   NewState = case GS of
@@ -218,7 +274,7 @@ handle_message_from_router({goodbye,_Details,_Reason},#state{goodbye_sent=GS}=St
                  NState
              end,
   close_connection(),
-  {ok,NewState};
+  {noreply, NewState, ?TIMEOUT};
 
 %handle_message_from_router({error,},#state{ets=Ets}) ->
 
@@ -230,14 +286,14 @@ handle_message_from_router({subscribed,RequestId,SubscriptionId},#state{ets=Ets}
   {Pid,_} = From,
   ets:insert_new(Ets,#subscription{id=SubscriptionId,mfa=Mfa,pid=Pid}),
   gen_server:reply(From,{ok,SubscriptionId}),
-  {ok,State};
+  {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({unsubscribed,RequestId},#state{ets=Ets}=State) ->
   {From,Args} = get_ref(RequestId,unsubscribe,State),
   SubscriptionId = maps:get(sub_id,Args),
   ets:delete(Ets,SubscriptionId),
   gen_server:reply(From,ok),
-  {ok,State};
+  {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({event,SubscriptionId,PublicationId,Details},State) ->
   handle_message_from_router({event,SubscriptionId,PublicationId,Details,undefined,undefined},State);
@@ -260,7 +316,7 @@ handle_message_from_router({event,SubscriptionId,_PublicationId,Details,Argument
           io:format("error ~p:~p with event: ~n~p~n",[Error,Reason,erlang:get_stacktrace()])
       end
   end,
-  {ok,State};
+  {noreply,State, ?TIMEOUT};
 handle_message_from_router({result,RequestId,Details},State) ->
   handle_message_from_router({result,RequestId,Details,undefined,undefined},State);
 handle_message_from_router({result,RequestId,Details,Arguments},State) ->
@@ -268,7 +324,7 @@ handle_message_from_router({result,RequestId,Details,Arguments},State) ->
 handle_message_from_router({result,RequestId,Details,Arguments,ArgumentsKw},State) ->
   {From,_} = get_ref(RequestId,call,State),
   gen_server:reply(From,{ok,Details,Arguments,ArgumentsKw}),
-  {ok,State};
+  {noreply,State, ?TIMEOUT};
 
 handle_message_from_router({registered,RequestId,RegistrationId},#state{ets=Ets}=State) ->
   {From,Args} = get_ref(RequestId,register,State),
@@ -276,14 +332,14 @@ handle_message_from_router({registered,RequestId,RegistrationId},#state{ets=Ets}
   {Pid,_} = From,
   ets:insert_new(Ets,#registration{id=RegistrationId,mfa=Mfa,pid=Pid}),
   gen_server:reply(From,{ok,RegistrationId}),
-  {ok,State};
+  {noreply,State, ?TIMEOUT};
 
 handle_message_from_router({unregistered,RequestId},#state{ets=Ets}=State) ->
   {From,Args} = get_ref(RequestId,unregister,State),
   RegistrationId = maps:get(reg_id,Args),
   ets:delete(Ets,RegistrationId),
   gen_server:reply(From,ok),
-  {ok,State};
+  {noreply,State, ?TIMEOUT};
 
 handle_message_from_router({invocation,RequestId,RegistrationId,Details},State) ->
   handle_message_from_router({invocation,RequestId,RegistrationId,Details,undefined,undefined},State);
@@ -316,7 +372,7 @@ handle_message_from_router({invocation,RequestId,RegistrationId,Details,Argument
                      NState
                  end
              end,
-  {ok,NewState};
+  {noreply,NewState, ?TIMEOUT};
 
 handle_message_from_router({error,Action,RequestId,Details,Error},State) ->
   handle_message_from_router({error,Action,RequestId,Details,Error,undefined,undefined},State);
@@ -325,11 +381,11 @@ handle_message_from_router({error,Action,RequestId,Details,Error,Arguments},Stat
 handle_message_from_router({error,_,RequestId,Details,Error,Arguments,ArgumentsKw},State) ->
   {From,_} = get_ref(RequestId,call,State),
   gen_server:reply(From,{error,Details,Error,Arguments,ArgumentsKw}),
-  {ok,State};
+  {noreply,State, ?TIMEOUT};
 
 handle_message_from_router(Msg,State) ->
   io:format("unhandled message ~p~n",[Msg]),
-  {ok,State}.
+  {noreply,State}.
 
 %
 % Session Scope IDs
@@ -409,3 +465,34 @@ get_ref(ReqId,Method,#state{ets=Ets}) ->
 
 close_connection() ->
   gen_server:cast(self(),terminate).
+
+
+
+%% @private
+send_ping(St) ->
+  send_ping(term_to_binary(make_ref()), St).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends a ping message with a reference() as a payload to the client and sent
+%% ourselves a ping_timeout message in the future.
+%% @end
+%% -----------------------------------------------------------------------------
+send_ping(Bin, St0) ->
+  {ok, St1} = send_to_router({ping, Bin}, St0),
+  Timeout = ?PING_TIMEOUT,
+  TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
+  St2 = St1#state{
+      ping_sent = {true, Bin, TimerRef},
+      ping_attempts = St1#state.ping_attempts + 1
+  },
+  {ok, St2}.
+
+
+stop_timeout(Reason, State) ->
+  _ = lager:error(
+    "Connection closing, reason=~p, attempts=~p",
+    [Reason, State#state.ping_attempts]),
+  {stop, timeout, State#state{ping_sent = false}}.
