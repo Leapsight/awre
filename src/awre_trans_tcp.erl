@@ -24,24 +24,29 @@
 -module(awre_trans_tcp).
 -behaviour(awre_transport).
 
+
+-define(RAW_PING_PREFIX, 1). % <<0:5, 1:3>>
+-define(RAW_PONG_PREFIX, 2). % <<0:5, 2:3>>
+
 -export([init/1]).
 -export([send_to_router/2]).
 -export([handle_info/2]).
 -export([shutdown/1]).
 
 -record(state,{
-               awre_con = unknown,
-               socket = none,
-               enc = unknown,
-               sernum = unknown,
-               realm = none,
-               version = unknown,
-               client_details = unknown,
-               buffer = <<"">>,
-               out_max = unknown,
-               handshake = in_progress
-               }).
+    awre_con = unknown,
+    socket = none,
+    enc = unknown,
+    sernum = unknown,
+    realm = none,
+    version = unknown,
+    client_details = unknown,
+    buffer = <<"">>,
+    out_max = unknown,
+    handshake = in_progress
+}).
 
+-compile([{parse_transform, lager_transform}]).
 
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
     host := Host, port := Port, enc := Encoding}) ->
@@ -69,12 +74,27 @@ init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := V
            end,
   MaxLen = 15,
   ok = gen_tcp:send(Socket,<<127,MaxLen:4,SerNum:4,0,0>>),
-  {ok,#state{awre_con=Con, version = Version, client_details=CDetails, socket=Socket, enc=Enc, sernum=SerNum, realm=Realm}}.
+    State = #state{
+        awre_con = Con,
+        version = Version,
+        client_details = CDetails,
+        socket = Socket,
+        enc = Enc,
+        sernum = SerNum,
+        realm = Realm
+    },
+    {ok, State}.
+
+
+send_to_router({ping, Payload}, #state{socket= S} = State) ->
+    Frame = <<(?RAW_PING_PREFIX):8, (byte_size(Payload)):24, Payload/binary>>,
+    ok = gen_tcp:send(S, Frame),
+    {ok, State};
 
 send_to_router({pong, Payload}, #state{socket= S} = State) ->
-  Frame = <<0:5, 2:3, (byte_size(Payload)):24, Payload/binary>>,
-  ok = gen_tcp:send(S, Frame),
-  {ok, State};
+    Frame = <<(?RAW_PONG_PREFIX):8, (byte_size(Payload)):24, Payload/binary>>,
+    ok = gen_tcp:send(S, Frame),
+    {ok, State};
 
 send_to_router(Message,#state{socket=S, enc=Enc, out_max=MaxLength} = State) ->
   SerMessage = wamper_protocol:serialize(Message,Enc),
@@ -98,12 +118,18 @@ handle_info({tcp,Socket,<<127,L:4,S:4,0,0>>},
   S = SerNum,
   State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
   send_to_router({hello,Realm,#{agent=>Version, roles => CDetails}},State1);
-handle_info({tcp_closed, _Socket}, State) ->
-  {stop, normal, State};
-  handle_info({tcp_error, _Socket, _}, State) ->
-  {stop, normal, State};
-handle_info(_Data,State) ->
-  {noreply, State}.
+handle_info({tcp_closed, Socket}, State) ->
+    _ = lager:info("Connection closed, socket='~p', reason=normal", [Socket]),
+    {stop, normal, State};
+
+handle_info({tcp_error, Socket, Reason}, State) ->
+    _ = lager:info(
+        "Connection closed, socket='~p', reason=~p", [Socket, Reason]),
+    {stop, Reason, State};
+
+handle_info(Info, State) ->
+    _ = lager:error("Received unknown info, message='~p'", [Info]),
+	{noreply, State}.
 
 
 shutdown(#state{socket=S}) ->
@@ -114,12 +140,23 @@ shutdown(#state{socket=S}) ->
 
 forward_messages([], _) ->
   ok;
+
 forward_messages([{ping, Payload}|Tail], State0) ->
   {ok, State1} = send_to_router({pong, Payload}, State0),
   forward_messages(Tail, State1);
 
 forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
   awre_con:send_to_client(Msg,Con),
-  forward_messages(Tail,State).
+  forward_messages(Tail, State).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
 
 
