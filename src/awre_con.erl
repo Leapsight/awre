@@ -148,7 +148,7 @@ handle_info(
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
   {ok, State1} = send_ping(State0),
-  N = State1#state.ping_max_attempts - State0#state.ping_attempts,
+  State1#state.ping_max_attempts - State0#state.ping_attempts,
   {noreply, State1};
 
 
