@@ -149,8 +149,6 @@ handle_info(
 handle_info(timeout, #state{ping_sent = false} = State0) ->
   {ok, State1} = send_ping(State0),
   N = State1#state.ping_max_attempts - State0#state.ping_attempts,
-  _ = lager:debug(
-      "Timeout. Sent ping to router, remaining_attempts=~p", [N]),
   {noreply, State1};
 
 
@@ -236,7 +234,6 @@ handle_message_from_client(_Msg,_From,State) ->
 
 handle_message_from_router({pong, Payload}, St) ->
   %% We received a PONG
-  _ = lager:debug("Received pong from router", []),
   case St#state.ping_sent of
       {true, Payload, TimerRef} ->
           %% We reset the state
