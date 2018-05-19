@@ -37,7 +37,8 @@
 
 -export([register/3,register/4]).
 -export([unregister/2]).
--export([call/3,call/4,call/5, call/6]).
+-export([call/3,call/4,call/5,call/6]).
+-export([async_call/4,async_call/5,async_call/6,async_call/7]).
 -export([yield/3,yield/4,yield/5]).
 -export([error/4]).
 
@@ -147,18 +148,35 @@ call(ConPid,Options,ProcedureUrl) ->
   call(ConPid,Options,ProcedureUrl,undefined,undefined).
 
 %% @doc Call a remote procedure.
--spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
+async_call(ConPid,From,Options,ProcedureUrl) ->
+  async_call(ConPid,From,Options,ProcedureUrl,undefined,undefined).
+
+
+%% @doc Call a remote procedure.
+-spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments :: list()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 call(ConPid,Options,ProcedureUrl,Arguments) ->
   call(ConPid,Options,ProcedureUrl,Arguments,undefined).
+
+
+%% @doc Call a remote procedure.
+async_call(ConPid,From,Options,ProcedureUrl,Arguments) ->
+  async_call(ConPid,From,Options,ProcedureUrl,Arguments,undefined).
 
 %% @doc Call a remote procedure.
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw) ->
   gen_server:call(ConPid,{awre_call,{call,Options,ProcedureUrl,Arguments,ArgumentsKw}}).
 
+async_call(ConPid,From,Options,ProcedureUrl,Arguments,ArgumentsKw) ->
+  gen_server:cast(ConPid,{awre_call, From, {async_call,Options,ProcedureUrl,Arguments,ArgumentsKw}}).
+
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined, timeout()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw, Timeout) ->
   gen_server:call(ConPid,{awre_call,{call,Options,ProcedureUrl,Arguments,ArgumentsKw}}, Timeout).
+
+
+async_call(ConPid,From,Options,ProcedureUrl,Arguments,ArgumentsKw, _Timeout) ->
+  gen_server:cast(ConPid,{awre_call, From, {async_call,Options,ProcedureUrl,Arguments,ArgumentsKw}}).
 
 %% @doc Return the result to a call.
 -spec yield(ConPid :: pid(), RequestId :: non_neg_integer(), Details :: list() ) -> ok.

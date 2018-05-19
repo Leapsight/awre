@@ -74,7 +74,8 @@
               req = undefined,
               method = undefined,
               ref=undefined,
-              args = []
+              args = [],
+              async=false
               }).
 
 -record(subscription,{
@@ -119,6 +120,9 @@ handle_call({awre_call,Msg},From,State) ->
 handle_call(_Msg,_From,State) ->
   {noreply,State, ?TIMEOUT}.
 
+
+handle_cast({awre_call,From,Msg},State) ->
+  handle_message_from_client(Msg, From, State);
 
 handle_cast({awre_out,Msg}, State) ->
   handle_message_from_router(Msg,State);
@@ -221,6 +225,9 @@ handle_message_from_client({unregister,RegistrationId},From,State) ->
 handle_message_from_client({call,Options,Procedure,Arguments,ArgumentsKw},From,State) ->
   {ok,NewState} = send_and_ref({call,request_id,Options,Procedure,Arguments,ArgumentsKw},From,#{},State),
   {noreply,NewState, ?TIMEOUT};
+handle_message_from_client({async_call,Options,Procedure,Arguments,ArgumentsKw},From,State) ->
+  {ok,NewState} = send_and_ref({async_call,request_id,Options,Procedure,Arguments,ArgumentsKw},From,#{},State),
+  {noreply,NewState, ?TIMEOUT};
 handle_message_from_client({yield,_,_,_,_}=Msg,_From,State) ->
   {ok,NewState} = send_to_router(Msg,State),
   {reply,ok,NewState, ?TIMEOUT};
@@ -250,13 +257,13 @@ handle_message_from_router({pong, Payload}, St) ->
   end;
 
 handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
-  {From,_} = get_ref(hello,hello,State),
+  {From,_,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{ok,SessionId,RouterDetails}),
   {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({abort,Details,Reason},State) ->
   lager:warning( "Abort: Details=~p, Reason=~p", [Details, Reason] ),
-  {From,_} = get_ref(hello,hello,State),
+  {From,_,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{abort,Details,Reason}),
   close_connection(),
   {noreply, State, ?TIMEOUT};
@@ -277,7 +284,7 @@ handle_message_from_router({goodbye,_Details,_Reason},#state{goodbye_sent=GS}=St
 %handle_message_from_router({published,},#state{ets=Ets}) ->
 
 handle_message_from_router({subscribed,RequestId,SubscriptionId},#state{ets=Ets}=State) ->
-  {From,Args} = get_ref(RequestId,subscribe,State),
+  {From,Args,_} = get_ref(RequestId,subscribe,State),
   Mfa = maps:get(mfa,Args),
   {Pid,_} = From,
   ets:insert_new(Ets,#subscription{id=SubscriptionId,mfa=Mfa,pid=Pid}),
@@ -285,7 +292,7 @@ handle_message_from_router({subscribed,RequestId,SubscriptionId},#state{ets=Ets}
   {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({unsubscribed,RequestId},#state{ets=Ets}=State) ->
-  {From,Args} = get_ref(RequestId,unsubscribe,State),
+  {From,Args,_} = get_ref(RequestId,unsubscribe,State),
   SubscriptionId = maps:get(sub_id,Args),
   ets:delete(Ets,SubscriptionId),
   gen_server:reply(From,ok),
@@ -318,12 +325,17 @@ handle_message_from_router({result,RequestId,Details},State) ->
 handle_message_from_router({result,RequestId,Details,Arguments},State) ->
   handle_message_from_router({result,RequestId,Details,Arguments,undefined},State);
 handle_message_from_router({result,RequestId,Details,Arguments,ArgumentsKw},State) ->
-  {From,_} = get_ref(RequestId,call,State),
-  gen_server:reply(From,{ok,Details,Arguments,ArgumentsKw}),
+  {From,_,Async} = get_ref(RequestId,call,State),
+  case Async of
+    true ->
+        From ! {ok,Details,Arguments,ArgumentsKw};
+    false ->
+        gen_server:reply(From,{ok,Details,Arguments,ArgumentsKw})
+  end,
   {noreply,State, ?TIMEOUT};
 
 handle_message_from_router({registered,RequestId,RegistrationId},#state{ets=Ets}=State) ->
-  {From,Args} = get_ref(RequestId,register,State),
+  {From,Args,_} = get_ref(RequestId,register,State),
   Mfa = maps:get(mfa,Args),
   {Pid,_} = From,
   ets:insert_new(Ets,#registration{id=RegistrationId,mfa=Mfa,pid=Pid}),
@@ -331,7 +343,7 @@ handle_message_from_router({registered,RequestId,RegistrationId},#state{ets=Ets}
   {noreply,State, ?TIMEOUT};
 
 handle_message_from_router({unregistered,RequestId},#state{ets=Ets}=State) ->
-  {From,Args} = get_ref(RequestId,unregister,State),
+  {From,Args,_} = get_ref(RequestId,unregister,State),
   RegistrationId = maps:get(reg_id,Args),
   ets:delete(Ets,RegistrationId),
   gen_server:reply(From,ok),
@@ -375,8 +387,13 @@ handle_message_from_router({error,Action,RequestId,Details,Error},State) ->
 handle_message_from_router({error,Action,RequestId,Details,Error,Arguments},State) ->
   handle_message_from_router({error,Action,RequestId,Details,Error,Arguments,undefined},State);
 handle_message_from_router({error,_,RequestId,Details,Error,Arguments,ArgumentsKw},State) ->
-  {From,_} = get_ref(RequestId,call,State),
-  gen_server:reply(From,{error,Details,Error,Arguments,ArgumentsKw}),
+  {From,_,Async} = get_ref(RequestId,call,State),
+  case Async of
+    true ->
+      From ! {error,Details,Error,Arguments,ArgumentsKw};
+    false ->
+      gen_server:reply(From,{error,Details,Error,Arguments,ArgumentsKw})
+    end,
   {noreply,State, ?TIMEOUT};
 
 handle_message_from_router(Msg,State) ->
@@ -441,23 +458,33 @@ create_ref_for_message(Msg,From,Args,#state{ets=Ets}=State)  ->
                              {Id,State#state{unregister_id = Id+1}};
                            call ->
                              Id = State#state.call_id,
-                             {Id,State#state{call_id = Id+1}}
+                             {Id,State#state{call_id = Id+1}};
+                           async_call ->
+                            Id = State#state.call_id,
+                            {Id,State#state{call_id = Id+1}}
                          end,
-  true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args}),
+  Msg1 = case Method of
+    async_call ->
+      true = ets:insert_new(Ets,#ref{key={call,RequestId},ref=From,args=Args, async=true}),
+      setelement(1,Msg, call);
+    _ ->
+      true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args, async=false}),
+      Msg
+  end,
   case is_integer(RequestId) of
     true ->
-      {setelement(2,Msg,RequestId),NewState};
+      {setelement(2,Msg1,RequestId),NewState};
     false ->
-      {Msg,NewState}
+      {Msg1,NewState}
   end.
 
 
 
 get_ref(ReqId,Method,#state{ets=Ets}) ->
   Key = {Method,ReqId},
-  [#ref{ref=From,args=Args}] = ets:lookup(Ets,Key),
+  [#ref{ref=From,args=Args,async=Async}] = ets:lookup(Ets,Key),
   ets:delete(Ets,Key),
-  {From,Args}.
+  {From,Args,Async}.
 
 close_connection() ->
   gen_server:cast(self(),terminate).

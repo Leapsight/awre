@@ -11,4 +11,4 @@ rel/example_project
 .erlang.mk/**
 _rel/
 logs/
-.erlang.mk/deps.log
+.erlang.mk/
