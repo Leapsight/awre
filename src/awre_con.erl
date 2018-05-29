@@ -328,7 +328,7 @@ handle_message_from_router({result,RequestId,Details,Arguments,ArgumentsKw},Stat
   {From,_,Async} = get_ref(RequestId,call,State),
   case Async of
     true ->
-        From ! {ok,Details,Arguments,ArgumentsKw};
+        From ! {wamp_result, {ok,Details,Arguments,ArgumentsKw}};
     false ->
         gen_server:reply(From,{ok,Details,Arguments,ArgumentsKw})
   end,
@@ -390,7 +390,7 @@ handle_message_from_router({error,_,RequestId,Details,Error,Arguments,ArgumentsK
   {From,_,Async} = get_ref(RequestId,call,State),
   case Async of
     true ->
-      From ! {error,Details,Error,Arguments,ArgumentsKw};
+      From ! {wamp_result, {error,Details,Error,Arguments,ArgumentsKw}};
     false ->
       gen_server:reply(From,{error,Details,Error,Arguments,ArgumentsKw})
     end,
