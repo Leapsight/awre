@@ -467,6 +467,8 @@ create_ref_for_message(Msg,From,Args,#state{ets=Ets}=State)  ->
     async_call ->
       true = ets:insert_new(Ets,#ref{key={call,RequestId},ref=From,args=Args, async=true}),
       setelement(1,Msg, call);
+    publish ->
+      Msg;
     _ ->
       true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args, async=false}),
       Msg
