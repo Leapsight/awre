@@ -38,7 +38,6 @@
 -export([register/3,register/4]).
 -export([unregister/2]).
 -export([call/3,call/4,call/5,call/6]).
--export([async_call/4,async_call/5,async_call/6,async_call/7]).
 -export([yield/3,yield/4,yield/5]).
 -export([error/4]).
 
