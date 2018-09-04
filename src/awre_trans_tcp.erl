@@ -51,6 +51,7 @@
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
     host := Host, port := Port, enc := Encoding}) ->
   {ok, Socket} = gen_tcp:connect(Host,Port,[binary,{packet,0}]),
+  link(Socket),
   % need to send the new TCP packet
   Enc = case Encoding of
           json -> raw_json;
@@ -125,7 +126,7 @@ handle_info({tcp_closed, Socket}, State) ->
 handle_info({tcp_error, Socket, Reason}, State) ->
     _ = lager:info(
         "Connection closed, socket='~p', reason=~p", [Socket, Reason]),
-    {stop, Reason, State};
+    {stop, tcp_closed, State};
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
@@ -156,7 +157,3 @@ forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
-
