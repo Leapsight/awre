@@ -120,7 +120,7 @@ handle_info({tcp,Socket,<<127,L:4,S:4,0,0>>},
   State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
   send_to_router({hello,Realm,#{agent=>Version, roles => CDetails}},State1);
 handle_info({tcp_closed, Socket}, State) ->
-    _ = lager:info("Connection closed, socket='~p', reason=normal", [Socket]),
+    _ = lager:info("Connection closed, socket='~p', reason=tcp_closed", [Socket]),
     {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
