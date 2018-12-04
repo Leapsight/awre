@@ -47,12 +47,22 @@
 %% @doc returns the version string for the application, used as agent description
 -spec get_version() -> Version::binary().
 get_version() ->
-  Ver = case application:get_key(vsn) of
-    {ok, V} -> list_to_binary(V);
-    _ -> <<"UNKNOWN">>
-  end,
-  << <<"Awre-">>/binary, Ver/binary >>.
-
+  case application:get_env(awre, agent, undefined) of
+    undefined ->
+      Ver = case application:get_key(vsn) of
+              {ok, V} -> list_to_binary(V);
+              _ -> <<"UNKNOWN">>
+            end,
+      <<"Awre-", Ver/binary >>;
+    App ->
+      Ver = case lists:keyfind(App, 1, application:loaded_applications()) of
+              {_, _, V} ->
+                  V;
+              false ->
+                  <<"UNKNOWN">>
+            end,
+      <<(list_to_binary(atom_to_list(App)))/binary, "-", (list_to_binary(Ver))/binary>>
+  end.
 
 
 %% connecting to a (remote) router (for peer)
