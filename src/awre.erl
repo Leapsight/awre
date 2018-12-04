@@ -59,7 +59,7 @@ get_version() ->
               {_, _, V} ->
                   V;
               false ->
-                  <<"UNKNOWN">>
+                  "UNKNOWN"
             end,
       <<(list_to_binary(atom_to_list(App)))/binary, "-", (list_to_binary(Ver))/binary>>
   end.
