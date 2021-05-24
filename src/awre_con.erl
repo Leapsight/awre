@@ -227,8 +227,8 @@ handle_message_from_client({call,Options,Procedure,Arguments,ArgumentsKw},From,S
 handle_message_from_client({yield,_,_,_,_}=Msg,_From,State) ->
   {ok,NewState} = send_to_router(Msg,State),
   {reply,ok,NewState, ?TIMEOUT};
-handle_message_from_client({error,invocation,RequestId,ArgsKw,ErrorUri},_From,State) ->
-  {ok,NewState} = send_to_router({error,invocation,RequestId,#{},ErrorUri,[],ArgsKw},State),
+handle_message_from_client({error,invocation,RequestId,Details,ErrorUri, Args, ArgsKw},_From,State) ->
+  {ok,NewState} = send_to_router({error,invocation,RequestId,Details,ErrorUri,Args,ArgsKw},State),
   {reply,ok,NewState, ?TIMEOUT};
 handle_message_from_client(_Msg,_From,State) ->
   {noreply,State, ?TIMEOUT}.
@@ -311,8 +311,8 @@ handle_message_from_router({event,SubscriptionId,_PublicationId,Details,Argument
       try
         erlang:apply(M,F,[Details,Arguments,ArgumentsKw,S])
       catch
-        Error:Reason ->
-          io:format("error ~p:~p with event: ~n~p~n",[Error,Reason,erlang:get_stacktrace()])
+        Error:Reason:Stacktrace ->
+          io:format("error ~p:~p with event: ~n~p~n",[Error,Reason,Stacktrace])
       end
   end,
   {noreply,State, ?TIMEOUT};

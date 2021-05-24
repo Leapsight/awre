@@ -39,7 +39,7 @@
 -export([unregister/2]).
 -export([call/3,call/4,call/5,call/6]).
 -export([yield/3,yield/4,yield/5]).
--export([error/4]).
+-export([error/6]).
 
 
 -export([get_version/0]).
@@ -186,5 +186,8 @@ yield(ConPid,RequestId,Details,Arguments,ArgumentsKw) ->
   gen_server:call(ConPid,{awre_call,{yield,RequestId,Details,Arguments,ArgumentsKw}}).
 
 %% @doc Return an error from a call.
-error(ConPid,RequestId,Reason,ErrorUri) ->
-  gen_server:call(ConPid, {awre_call,{error,invocation,RequestId,Reason,ErrorUri}}).
+error(ConPid,RequestId,Details,ErrorUri, Args, ArgsKw) ->
+  gen_server:call(
+    ConPid,
+    {awre_call, {error,invocation,RequestId,Details,ErrorUri,Args,ArgsKw}}
+  ).
