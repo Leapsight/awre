@@ -23,7 +23,8 @@
 %% @private
 -module(awre_con).
 -behaviour(gen_server).
--compile([{parse_transform, lager_transform}]).
+
+-include_lib("kernel/include/logger.hrl").
 
 
 -define(TIMEOUT, 60000). % 60 secs
@@ -161,12 +162,12 @@ handle_info(
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
   %% We try again until we reach ping_max_attempts
-  N = State#state.ping_max_attempts - State#state.ping_attempts,
-  _ = lager:debug(
-      "Ping timeout. Sending additional ping to router, "
-      "remaining_attempts=~p",
-      [N]
-  ),
+  ?LOG_DEBUG(#{
+      text => "Ping timeout. Sending additional ping to router.",
+      attempt => io_lib:format(
+        "~p/~p", [State#state.ping_attempts,State#state.ping_max_attempts]
+      )
+  }),
   {ok, State1} = send_ping(Bin, State),
   {noreply, State1, ?TIMEOUT};
 
@@ -176,11 +177,14 @@ handle_info(Data,#state{transport = {T,TState}} = State) ->
     {ok,NewTState} ->
       {noreply,State#state{transport={T,NewTState}}, ?TIMEOUT};
     {stop,Reason,NewTState} ->
-      lager:info( "Connection closed: Reason=~p", [Reason] ),
+      ?LOG_INFO(#{text => "Connection closed", reason => Reason}),
       {stop,Reason,State#state{transport={T,NewTState}}}
   end;
 handle_info(Info, State) ->
-  _ = lager:error("Received unknown info, message='~p'", [Info]),
+  ?LOG_ERROR(#{
+    text => "Received unknown info message",
+    message => Info
+  }),
 	{noreply, State, ?TIMEOUT}.
 
 terminate(_Reason, _State) ->
@@ -243,11 +247,11 @@ handle_message_from_router({pong, Payload}, St) ->
           {noreply, St#state{ping_sent = false, ping_attempts = 0}, ?TIMEOUT};
       {true, _, TimerRef} ->
           ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-          _ = lager:error(
+          ?LOG_ERROR(
               "Invalid pong message from peer, reason=invalid_payload", []),
           {stop, invalid_ping_response, St};
       false ->
-          _ = lager:error("Unrequested pong message from peer", []),
+          ?LOG_ERROR("Unrequested pong message from peer", []),
           %% Should we stop instead?
           {noreply, St, ?TIMEOUT}
   end;
@@ -258,7 +262,13 @@ handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {noreply, State, ?TIMEOUT};
 
 handle_message_from_router({abort,Details,Reason},State) ->
-  lager:warning( "Abort: Details=~p, Reason=~p", [Details, Reason] ),
+  ?LOG_WARNING(#{
+    text => "Aborting connection",
+    wamp => #{
+      details => Details,
+      reason => Reason
+    }
+  }),
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{abort,Details,Reason}),
   close_connection(),
@@ -491,7 +501,11 @@ send_ping(Bin, St0) ->
 
 
 stop_timeout(Reason, State) ->
-  _ = lager:error(
-    "Connection closing, reason=~p, attempts=~p",
-    [Reason, State#state.ping_attempts]),
+  ?LOG_ERROR(#{
+    text => "Connection closing",
+    reason => Reason,
+    attempt => io_lib:format(
+      "~p/~p", [State#state.ping_attempts,State#state.ping_max_attempts]
+    )
+  }),
   {stop, timeout, State#state{ping_sent = false}}.

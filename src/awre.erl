@@ -181,7 +181,8 @@ call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw) ->
   Timeout = get_timeout(Options),
   gen_server:call(
     ConPid,
-    {awre_call, {call, Options, ProcedureUrl, Arguments, ArgumentsKw}}
+    {awre_call, {call, Options, ProcedureUrl, Arguments, ArgumentsKw}},
+    Timeout
   ).
 
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined, timeout()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.

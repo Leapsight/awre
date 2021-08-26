@@ -23,7 +23,7 @@
 
 -module(awre_trans_tcp).
 -behaviour(awre_transport).
-
+-include_lib("kernel/include/logger.hrl").
 
 -define(RAW_PING_PREFIX, 1). % <<0:5, 1:3>>
 -define(RAW_PONG_PREFIX, 2). % <<0:5, 2:3>>
@@ -46,7 +46,6 @@
     handshake = in_progress
 }).
 
--compile([{parse_transform, lager_transform}]).
 
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
     host := Host, port := Port, enc := Encoding}) ->
@@ -120,16 +119,26 @@ handle_info({tcp,Socket,<<127,L:4,S:4,0,0>>},
   State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
   send_to_router({hello,Realm,#{agent=>Version, roles => CDetails}},State1);
 handle_info({tcp_closed, Socket}, State) ->
-    _ = lager:info("Connection closed, socket='~p', reason=tcp_closed", [Socket]),
+    ?LOG_INFO(#{
+      text => "Connection closed",
+      reason => tcp_closed,
+      socket => Socket
+    }),
     {stop, tcp_closed, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
-    _ = lager:info(
-        "Connection closed, socket='~p', reason=~p", [Socket, Reason]),
+    ?LOG_INFO(#{
+        text => "Connection closed",
+        socket => Socket,
+        reason => Reason
+    }),
     {stop, Reason, State};
 
 handle_info(Info, State) ->
-    _ = lager:error("Received unknown info, message='~p'", [Info]),
+    ?LOG_ERROR(#{
+      text => "Received unknown info message",
+      message => Info
+    }),
 	{noreply, State}.
 
 
