@@ -23,6 +23,7 @@
 
 -module(awre).
 
+-define(TIMEOUT, 15000).
 
 %% API for connecting to a router (either local or remote)
 -export([start_client/0]).
@@ -153,20 +154,38 @@ unregister(ConPid,RegistrationId) ->
 
 %% @doc Call a remote procedure.
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
+
 call(ConPid,Options,ProcedureUrl) ->
-  call(ConPid,Options,ProcedureUrl,undefined,undefined).
+  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  gen_server:call(
+    ConPid,
+    {awre_call, {call, Options, ProcedureUrl}},
+    Timeout
+  ).
 
 %% @doc Call a remote procedure.
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments :: list()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
-call(ConPid,Options,ProcedureUrl,Arguments) ->
-  call(ConPid,Options,ProcedureUrl,Arguments,undefined).
+
+call(ConPid, Options, ProcedureUrl, Arguments) ->
+  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  gen_server:call(
+    ConPid,
+    {awre_call, {call, Options, ProcedureUrl, Arguments}},
+    Timeout
+  ).
 
 %% @doc Call a remote procedure.
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
+
 call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw) ->
-  gen_server:call(ConPid,{awre_call,{call,Options,ProcedureUrl,Arguments,ArgumentsKw}}).
+  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  gen_server:call(
+    ConPid,
+    {awre_call, {call, Options, ProcedureUrl, Arguments, ArgumentsKw}}
+  ).
 
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined, timeout()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
+
 call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw, Timeout) ->
   gen_server:call(ConPid,{awre_call,{call,Options,ProcedureUrl,Arguments,ArgumentsKw}}, Timeout).
 
