@@ -156,7 +156,7 @@ unregister(ConPid,RegistrationId) ->
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 
 call(ConPid,Options,ProcedureUrl) ->
-  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  Timeout = get_timeout(Options),
   gen_server:call(
     ConPid,
     {awre_call, {call, Options, ProcedureUrl}},
@@ -167,7 +167,7 @@ call(ConPid,Options,ProcedureUrl) ->
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments :: list()) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 
 call(ConPid, Options, ProcedureUrl, Arguments) ->
-  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  Timeout = get_timeout(Options),
   gen_server:call(
     ConPid,
     {awre_call, {call, Options, ProcedureUrl, Arguments}},
@@ -178,7 +178,7 @@ call(ConPid, Options, ProcedureUrl, Arguments) ->
 -spec call(ConPid :: pid(), Options :: list(), ProcedureUrl :: binary(), Arguments::list() | undefined , ArgumentsKw :: list() | undefined) -> {ok, Details :: list(), ResA :: list() | undefined, ResAKw :: list() | undefined}.
 
 call(ConPid,Options,ProcedureUrl,Arguments,ArgumentsKw) ->
-  Timeout = maps:get(timeout, Options, ?TIMEOUT),
+  Timeout = get_timeout(Options),
   gen_server:call(
     ConPid,
     {awre_call, {call, Options, ProcedureUrl, Arguments, ArgumentsKw}}
@@ -210,3 +210,11 @@ error(ConPid,RequestId,Details,ErrorUri, Args, ArgsKw) ->
     ConPid,
     {awre_call, {error,invocation,RequestId,Details,ErrorUri,Args,ArgsKw}}
   ).
+
+
+
+get_timeout(L) ->
+  case lists:keyfind(timeout, 1, L) of
+    {timeout, Value} -> Value;
+    _ -> ?TIMEOUT
+  end.
