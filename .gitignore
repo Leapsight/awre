@@ -12,3 +12,4 @@ rel/example_project
 _rel/
 logs/
 .erlang.mk/
+_build/
