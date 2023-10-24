@@ -49,9 +49,14 @@
 
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
     host := Host, port := Port, enc := Encoding}) ->
-  %% {ok, Socket} = gen_tcp:connect(Host,Port,[binary,{packet,0}], 5000),
-  %% hack for demo
-  {ok, Socket} = gen_tcp:connect(Host,Port,[binary,{packet,0}, inet6], 5000),
+  Family = case application:get_env(awre, ip_version, 4) of
+    6 ->
+      inet6;
+    _ ->
+      %% 4 or invalid value
+      inet
+  end,
+  {ok, Socket} = gen_tcp:connect(Host,Port,[binary,{packet,0}, Family], 5000),
   link(Socket),
   % need to send the new TCP packet
   Enc = case Encoding of
