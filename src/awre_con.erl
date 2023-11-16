@@ -456,7 +456,13 @@ create_ref_for_message(Msg,From,Args,#state{ets=Ets}=State)  ->
                              Id = State#state.call_id,
                              {Id,State#state{call_id = Id+1}}
                          end,
-  true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args}),
+  case Method of
+    publish ->
+      ok;
+    _ ->
+      true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args})
+  end,
+
   case is_integer(RequestId) of
     true ->
       {setelement(2,Msg,RequestId),NewState};
