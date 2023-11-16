@@ -456,9 +456,9 @@ create_ref_for_message(Msg,From,Args,#state{ets=Ets}=State)  ->
                              Id = State#state.call_id,
                              {Id,State#state{call_id = Id+1}}
                          end,
-  case Method of
+  true = case Method of
     publish ->
-      ok;
+      true;
     _ ->
       true = ets:insert_new(Ets,#ref{key={Method,RequestId},ref=From,args=Args})
   end,
