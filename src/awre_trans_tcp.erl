@@ -43,12 +43,15 @@
     client_details = unknown,
     buffer = <<"">>,
     out_max = unknown,
-    handshake = in_progress
+    handshake = in_progress,
+    authid = none,
+    authmethod = anonymous,
+    authkey = none
 }).
 
 
 init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := Version,
-    host := Host, port := Port, enc := Encoding}) ->
+    host := Host, port := Port, enc := Encoding} = Args) ->
   Family = case application:get_env(awre, ip_version, 4) of
     6 ->
       inet6;
@@ -81,6 +84,7 @@ init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := V
            end,
   MaxLen = 15,
   ok = gen_tcp:send(Socket,<<127,MaxLen:4,SerNum:4,0,0>>),
+    AuthDetails = maps:get(auth_details, Args, #{}),
     State = #state{
         awre_con = Con,
         version = Version,
@@ -88,7 +92,10 @@ init(#{realm := Realm, awre_con := Con, client_details := CDetails, version := V
         socket = Socket,
         enc = Enc,
         sernum = SerNum,
-        realm = Realm
+        realm = Realm,
+        authid = maps:get(authid, AuthDetails, none),
+        authmethod = maps:get(authmethod, AuthDetails, anonymous),
+        authkey = maps:get(authkey, AuthDetails, none)
     },
     {ok, State}.
 
@@ -102,6 +109,18 @@ send_to_router({pong, Payload}, #state{socket= S} = State) ->
     Frame = <<(?RAW_PONG_PREFIX):8, (byte_size(Payload)):24, Payload/binary>>,
     ok = gen_tcp:send(S, Frame),
     {ok, State};
+
+send_to_router({challenge, password}, State) ->
+  Password = State#state.authkey,
+  Signature = handle_challenge(password, Password),
+  Message = {authenticate, Signature, #{}},
+  send_to_router(Message, State);
+
+send_to_router({challenge, wampcra, AuthExtra}, State) ->
+  Password = State#state.authkey,
+  Signature = handle_challenge(wampcra, Password, AuthExtra),
+  Message = {authenticate, Signature, #{}},
+  send_to_router(Message, State);
 
 send_to_router(Message,#state{socket=S, enc=Enc, out_max=MaxLength} = State) ->
   SerMessage = wamper_protocol:serialize(Message,Enc),
@@ -117,14 +136,28 @@ handle_info({tcp,Socket,Data},#state{buffer=Buffer,socket=Socket,enc=Enc, handsh
   {Messages,NewBuffer} = wamper_protocol:deserialize(<<Buffer/binary, Data/binary>>,Enc),
   forward_messages(Messages,State),
   {ok,State#state{buffer=NewBuffer}};
+
 handle_info({tcp,Socket,<<127,0,0,0>>},#state{socket=Socket}=State) ->
   forward_messages([{abort,#{},tcp_handshake_failed}],State),
   {ok,State};
-handle_info({tcp,Socket,<<127,L:4,S:4,0,0>>},
-            #state{socket=Socket,realm=Realm,sernum=SerNum, version=Version, client_details=CDetails}=State) ->
+
+handle_info({tcp, Socket, <<127,L:4,S:4,0,0>>},
+    #state{socket=Socket, realm=Realm, sernum=SerNum, version=Version, client_details=CDetails,
+        authid=AuthId, authmethod=AuthMethod, authkey=AuthKey} = State) ->
   S = SerNum,
-  State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
-  send_to_router({hello,Realm,#{agent=>Version, roles => CDetails}},State1);
+  case AuthMethod of
+    anonymous ->
+      State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
+      send_to_router({hello, Realm, #{agent => Version, roles => CDetails}}, State1);
+    _ ->
+      %% password authentication
+      %% wampcra authentication
+      State1 = State#state{out_max=math:pow(2,9+L), handshake=done},
+      send_to_router({hello, Realm,
+        #{agent => Version, roles => CDetails, authid => AuthId,
+            authmethods => [AuthMethod], authkey => AuthKey}},State1)
+  end;
+
 handle_info({tcp_closed, Socket}, State) ->
     ?LOG_INFO(#{
       text => "Connection closed",
@@ -173,3 +206,44 @@ forward_messages([Msg|Tail],#state{awre_con=Con}=State) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% ----------------------------------------------------------------------------
+%% @private
+%% @doc Handles the challenge received from the router
+%% @end
+%% ----------------------------------------------------------------------------
+-spec handle_challenge(password, binary()) -> binary().
+
+handle_challenge(password, Password) ->
+  handle_challenge(password, Password, #{}).
+
+
+%% ----------------------------------------------------------------------------
+%% @private
+%% @doc Handles the challenge received from the router
+%% @end
+%% ----------------------------------------------------------------------------
+-spec handle_challenge(password | wampcra, binary(), map()) -> binary().
+
+handle_challenge(password, Password, _) ->
+  Password;
+
+%% Authenticates using WAMP-CRA
+handle_challenge(wampcra, Password, AuthExtra) ->
+    %% Extract challenge parameters
+    #{
+        salt := Salt,
+        iterations := Iterations,
+        keylen := KeyLength,
+        challenge := Challenge
+    } = AuthExtra,
+
+    %% Derive key using PBKDF2 (Password-Based Key Derivation Function 2)
+    {ok, SaltedPassword} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    Key = base64:encode(SaltedPassword),
+
+    %% Calculate HMAC-SHA256 of the challenge using the derived key
+    Signature = crypto:mac(hmac, sha256, Key, Challenge),
+    base64:encode(Signature).

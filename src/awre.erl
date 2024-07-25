@@ -31,6 +31,7 @@
 
 -export([connect/2]).
 -export([connect/5]).
+-export([connect/6]).
 
 -export([subscribe/3,subscribe/4]).
 -export([unsubscribe/2]).
@@ -98,6 +99,12 @@ connect(ConPid,Realm) ->
 connect(ConPid,Host,Port,Realm,Encoding) ->
   gen_server:call(ConPid,{awre_call,{connect,Host,Port,Realm,Encoding}}).
 
+-spec connect(ConPid :: pid(), Host :: string(), Port :: non_neg_integer(), Realm :: binary(), Encoding :: raw_json | raw_msgpack, AuthDetails :: undefined | map()) -> {ok,SessionId :: non_neg_integer() ,RouterDetails :: list()}.
+connect(ConPid,Host,Port,Realm,Encoding,undefined) ->
+  connect(ConPid,Host,Port,Realm,Encoding);
+
+connect(ConPid, Host, Port, Realm, Encoding, AuthDetails) ->
+  gen_server:call(ConPid, {awre_call, {connect, Host, Port, Realm, Encoding, AuthDetails}}).
 
 
 %% @doc Subscribe to an event.

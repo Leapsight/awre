@@ -256,6 +256,14 @@ handle_message_from_router({pong, Payload}, St) ->
           {noreply, St, ?TIMEOUT}
   end;
 
+handle_message_from_router({challenge, <<"password">>, _}, State) ->
+    {ok, NewState} = send_to_router({challenge, password}, State),
+    {noreply, NewState, ?TIMEOUT};
+
+handle_message_from_router({challenge, wampcra, AuthExtra}, State) ->
+    {ok, NewState} = send_to_router({challenge, wampcra, AuthExtra}, State),
+    {noreply, NewState, ?TIMEOUT};
+
 handle_message_from_router({welcome,SessionId,RouterDetails},State) ->
   {From,_} = get_ref(hello,hello,State),
   gen_server:reply(From,{ok,SessionId,RouterDetails}),
