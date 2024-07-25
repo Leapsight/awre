@@ -196,20 +196,38 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec handle_message_from_client(Msg :: term(), From :: term(), State :: #state{}) ->
   {noreply, #state{}} | {reply, Result :: term(), #state{}}.
-handle_message_from_client({connect,Host,Port,Realm,Encoding}=Msg,From,
-                           #state{transport={T,_}}=State) ->
 
-  Args = #{awre_con => self(), host => Host, port => Port, realm => Realm, enc => Encoding,
-           version => awre:get_version(), client_details => ?CLIENT_DETAILS},
-{Trans, TState} = case T of
-    none ->
-      awre_transport:init(Args);
-    T ->
-      NewTState = T:init(Args),
-      {T,NewTState}
-  end,
-  {_,NewState} = create_ref_for_message(Msg,From,#{},State),
-  {noreply,NewState#state{transport={Trans,TState}}, ?TIMEOUT};
+handle_message_from_client({connect,Host,Port,Realm,Encoding},
+    From, #state{transport = {_, _}} = State) ->
+    handle_message_from_client({connect, Host, Port, Realm, Encoding, undefined}, From, State);
+
+handle_message_from_client({connect, Host, Port, Realm, Encoding, AuthDetails} = Msg,
+    From, #state{transport = {T, _}} = State) ->
+    Args0 = #{
+        awre_con => self(),
+        host => Host,
+        port => Port,
+        realm => Realm,
+        enc => Encoding,
+        version => awre:get_version(),
+        client_details => ?CLIENT_DETAILS
+    },
+    Args = case AuthDetails of
+        undefined ->
+            Args0;
+        AuthDetails ->
+            Args0#{auth_details => AuthDetails}
+    end,
+    {Trans, TState} = case T of
+        none ->
+            awre_transport:init(Args);
+        T ->
+            NewTState = T:init(Args),
+            {T,NewTState}
+    end,
+    {_, NewState} = create_ref_for_message(Msg, From, #{}, State),
+    {noreply, NewState#state{transport = {Trans, TState}}, ?TIMEOUT};
+
 handle_message_from_client({subscribe,Options,Topic,Mfa},From,State) ->
   {ok,NewState} = send_and_ref({subscribe,request_id,Options,Topic},From,#{mfa => Mfa},State),
   {noreply,NewState, ?TIMEOUT};
