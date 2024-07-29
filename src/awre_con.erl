@@ -273,12 +273,13 @@ handle_message_from_router({pong, Payload}, St) ->
             {noreply, St#state{ping_sent = false, ping_attempts = 0}, ?TIMEOUT};
         {true, _, TimerRef} ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            ?LOG_ERROR(
-                "Invalid pong message from peer, reason=invalid_payload", []
-            ),
+            ?LOG_ERROR(#{
+                message => "Invalid pong message from peer",
+                reason => "invalid_payload"
+            }),
             {stop, invalid_ping_response, St};
         false ->
-            ?LOG_ERROR("Unrequested pong message from peer", []),
+            ?LOG_ERROR(#{message => "Unrequested pong message from peer"}),
             %% Should we stop instead?
             {noreply, St, ?TIMEOUT}
     end;
@@ -364,7 +365,12 @@ handle_message_from_router(
                 erlang:apply(M, F, [Details, Arguments, ArgumentsKw, S])
             catch
                 Error:Reason:Stacktrace ->
-                    io:format("error ~p:~p with event: ~n~p~n", [Error, Reason, Stacktrace])
+                    ?LOG_ERROR(#{
+                        message => "Error applying event message from router",
+                        error => Error,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    })
             end
     end,
     {noreply, State, ?TIMEOUT};
@@ -454,12 +460,29 @@ handle_message_from_router({error, Action, RequestId, Details, Error, Arguments}
     handle_message_from_router(
         {error, Action, RequestId, Details, Error, Arguments, undefined}, State
     );
-handle_message_from_router({error, _, RequestId, Details, Error, Arguments, ArgumentsKw}, State) ->
-    {From, _} = get_ref(RequestId, call, State),
+%% example: trying to register without authorization:
+%% {
+%%      error,
+%%      register,
+%%      1,
+%%      #{},
+%%      <<"wamp.error.not_authorized">>,
+%%      [<<"Permission denied. User 'john.doe' does not have permission 'wamp.register' on 'com.magenta.thing.alias.erase'">>],
+%%      #{<<"message">> => <<"Permission denied. User 'john.doe' does not have permission 'wamp.register' on 'com.magenta.thing.alias.erase'">>}
+%% }
+handle_message_from_router({error, Action, RequestId, Details, Error, Arguments, ArgumentsKw}, State) ->
+    ?LOG_ERROR(#{
+        message => "Received error message from router",
+        action => Action,
+        error => Error,
+        args => Arguments,
+        kwargs => ArgumentsKw
+    }),
+    {From, _} = get_ref(RequestId, Action, State),
     gen_server:reply(From, {error, Details, Error, Arguments, ArgumentsKw}),
     {noreply, State, ?TIMEOUT};
 handle_message_from_router(Msg, State) ->
-    io:format("unhandled message ~p~n", [Msg]),
+    ?LOG_ERROR(#{text => "Received unhandled message from router", message => Msg}),
     {noreply, State}.
 
 %
