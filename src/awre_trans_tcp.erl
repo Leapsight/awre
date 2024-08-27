@@ -138,8 +138,9 @@ send_to_router({challenge, wampcra, AuthExtra}, State) ->
     send_to_router(Message, State);
 %% Authenticates using cryptosign
 send_to_router({challenge, cryptosign, AuthExtra}, State) ->
+    PubKey = maps:get(pubkey, State#state.auth_details, <<>>),
     PrivKey = maps:get(privkey, State#state.auth_details, <<>>),
-    Signature = handle_challenge(cryptosign, PrivKey, AuthExtra),
+    Signature = handle_challenge(cryptosign, {PubKey, PrivKey}, AuthExtra),
     Message = {authenticate, Signature, #{}},
     send_to_router(Message, State);
 send_to_router(Message, #state{socket = S, enc = Enc, out_max = MaxLength} = State) ->
@@ -256,17 +257,18 @@ forward_messages([Msg | Tail], #state{awre_con = Con} = State) ->
 -spec handle_challenge(password, binary()) -> binary().
 
 handle_challenge(password, Password) ->
-    handle_challenge(password, Password, #{}).
+    handle_challenge(password, Password, undefined).
 
 %% ----------------------------------------------------------------------------
 %% @private
 %% @doc Handles the challenge received from the router
 %% @end
 %% ----------------------------------------------------------------------------
--spec handle_challenge(password | wampcra | cryptosign, binary(), map()) -> binary().
+-spec handle_challenge(password | wampcra | cryptosign, binary() | tuple(), undefined | map()) -> binary().
 
 handle_challenge(password, Password, _) ->
     Password;
+
 %% Authenticates using WAMP-CRA
 %% AuthExtra = #{
 %%  challenge
@@ -284,24 +286,40 @@ handle_challenge(wampcra, Password, AuthExtra) ->
     } = AuthExtra,
 
     %% Derive key using PBKDF2 (Password-Based Key Derivation Function 2)
-    {ok, SaltedPassword} = pbkdf2:pbkdf2(sha256, Password, Salt, Iterations, KeyLength),
+    SaltedPassword = crypto:pbkdf2_hmac(sha256, Password, Salt, Iterations, KeyLength),
     Key = base64:encode(SaltedPassword),
 
     %% Calculate HMAC-SHA256 of the challenge using the derived key
     Signature = crypto:mac(hmac, sha256, Key, Challenge),
     base64:encode(Signature);
+
 %% Authenticates using cryptosign
 %% AuthExtra = #{
 %%  challenge
 %%  <<"channel_binding">>
 %% }
-handle_challenge(cryptosign, PrivKey, AuthExtra) ->
+handle_challenge(cryptosign, {PubKey, PrivKey}, AuthExtra) ->
     HexMessage = maps:get(challenge, AuthExtra, <<>>),
 
     Message = hex_utils:hexstr_to_bin(HexMessage),
     Signature = list_to_binary(
         hex_utils:bin_to_hexstr(
-            enacl:sign_detached(Message, hex_utils:hexstr_to_bin(PrivKey))
+            sign(Message, PubKey, PrivKey)
         )
     ),
+
     Signature.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Signs a challenge using the provided public and private keys. The keys are in hex format.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec sign(Challenge :: binary(), PubKey :: binary(), PrivKey :: binary()) ->
+    Signature :: binary().
+
+sign(Challenge, HexPubKey, HexPrivKey) ->
+    PubKey = hex_utils:hexstr_to_bin(HexPubKey),
+    PrivKey = hex_utils:hexstr_to_bin(HexPrivKey),
+    public_key:sign(Challenge, ignored, {ed_pri, ed25519, PubKey, PrivKey}, []).
