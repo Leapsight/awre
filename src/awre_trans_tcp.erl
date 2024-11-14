@@ -321,5 +321,24 @@ handle_challenge(cryptosign, {PubKey, PrivKey}, AuthExtra) ->
 
 sign(Challenge, HexPubKey, HexPrivKey) ->
     PubKey = hex_utils:hexstr_to_bin(HexPubKey),
-    PrivKey = hex_utils:hexstr_to_bin(HexPrivKey),
+    PrivKey = normalise_privkey(hex_utils:hexstr_to_bin(HexPrivKey)),
     public_key:sign(Challenge, ignored, {ed_pri, ed25519, PubKey, PrivKey}, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% Normalizes an Ed25519 private key to ensure it is in the 32-byte format required 
+%% for signing operations. This function accepts either a 32-byte or 64-byte binary key.
+%% If a 64-byte key is provided, it assumes the key consists of a 32-byte private key
+%% followed by a 32-byte public key, and returns only the first 32 bytes (the private key).
+%% If a 32-byte key is provided, or even if the key is neither 32 nor 64 bytes,
+%% the private key is returned and then the sign will be fail.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec normalise_privkey(binary()) -> binary().
+
+normalise_privkey(Key) when byte_size(Key) == 64 ->
+    binary:part(Key, {0, 32});
+
+normalise_privkey(Key) ->
+    Key.
